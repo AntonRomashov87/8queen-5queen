@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Master: N-Queens & Dominance</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --accent: #2c3e50;
+            --green-light: #eeeed2; --green-dark: #769656;
+            --blue-light: #dee3e6; --blue-dark: #8ca2ad;
+            --brown-light: #f0d9b5; --brown-dark: #b58863;
+            --pink-light: #ffe4e1; --pink-dark: #db7093;
+            --controlled: rgba(46, 204, 113, 0.5);
+            --conflict: #e74c3c;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background-color: var(--bg-color);
+            display: flex; flex-direction: column; align-items: center;
+            padding: 20px; margin: 0; min-height: 100vh;
+        }
+
+        .main-header { text-align: center; margin-bottom: 20px; }
+        .main-header h1 { color: var(--accent); margin: 0; }
+        
+        .mode-selector {
+            display: flex; gap: 10px; margin-bottom: 20px;
+            background: #ddd; padding: 5px; border-radius: 50px;
+        }
+
+        .mode-btn {
+            padding: 10px 25px; border: none; border-radius: 50px;
+            cursor: pointer; font-weight: bold; transition: 0.3s;
+            background: transparent; color: #555;
+        }
+
+        .mode-btn.active {
+            background: var(--accent); color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .controls {
+            background: white; padding: 15px 25px; border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px;
+            display: flex; gap: 15px; align-items: center; flex-wrap: wrap; justify-content: center;
+        }
+
+        .board {
+            display: grid; border: 5px solid #333;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2); user-select: none;
+        }
+
+        .cell {
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; position: relative;
+        }
+
+        .queen::after {
+            content: '♛'; color: #000; text-shadow: 0 0 2px #fff;
+            position: relative; z-index: 10;
+        }
+
+        /* Підсвітки */
+        .controlled::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: var(--controlled); z-index: 1;
+        }
+        
+        .conflict { background-color: var(--conflict) !important; animation: shake 0.4s; }
+
+        @keyframes shake {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(0.95); }
+        }
+
+        #timer {
+            font-family: monospace; background: #2c3e50; color: #ecf0f1;
+            padding: 5px 15px; border-radius: 5px; font-size: 1.4rem;
+        }
+
+        #status { font-weight: bold; font-size: 1.1rem; color: var(--accent); }
+
+        button.reset {
+            padding: 10px 20px; cursor: pointer; background: #95a5a6;
+            color: white; border: none; border-radius: 5px; font-weight: bold;
+        }
+
+        /* ВІКНО ПЕРЕМОГИ */
+        #win-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); z-index: 9999;
+            flex-direction: column; justify-content: center; align-items: center; color: white;
+        }
+        .cup { font-size: 100px; animation: bounce 2s infinite; }
+        @keyframes bounce { 0%,100% {transform: translateY(0)} 50% {transform: translateY(-20px)} }
+    </style>
+</head>
+<body>
+
+    <div class="main-header">
+        <h1>Chess Lab</h1>
+        <p id="mode-desc">Розставте ферзів так, щоб вони не били один одного</p>
+    </div>
+
+    <div class="mode-selector">
+        <button class="mode-btn active" onclick="setMode('peace', this)">Мирні ферзі</button>
+        <button class="mode-btn" onclick="setMode('dominate', this)">Домінування</button>
+    </div>
+    
+    <div class="controls">
+        <select id="sizeSelect" onchange="initBoard()"></select>
+        <select id="colorSelect" onchange="initBoard()">
+            <option value="green">Зелена</option>
+            <option value="blue">Синя</option>
+            <option value="brown">Коричнева</option>
+            <option value="pink">Рожева</option>
+        </select>
+        <div id="timer">00:00</div>
+        <button class="reset" onclick="initBoard()">Скинути</button>
+        <div id="status">Ферзі: 0 / 8</div>
+    </div>
+
+    <div id="board" class="board"></div>
+
+    <div id="win-overlay">
+        <span class="cup">🏆</span>
+        <h2 id="win-title" style="font-size: 3rem; color: #f1c40f;">Чудово!</h2>
+        <p id="win-stats" style="font-size: 1.5rem;"></p>
+        <button onclick="closeWin()" style="background: #f1c40f; color: #000; padding: 15px 40px; border:none; border-radius: 50px; font-weight:bold; cursor:pointer;">Далі</button>
+    </div>
+
+    <script>
+        const domLimits = { 4: 2, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5, 10: 7, 11: 8, 12: 8, 13: 9, 14: 10, 15: 11, 16: 12, 17: 13, 18: 14, 19: 15, 20: 16 };
+        let currentMode = 'peace'; // 'peace' або 'dominate'
+        let n = 8, limit = 8;
+        let queens = [];
+        let startTime, timerInterval, gameActive = false;
+
+        const sizeSelect = document.getElementById('sizeSelect');
+        for (let i = 4; i <= 20; i++) {
+            let opt = document.createElement('option');
+            opt.value = i; opt.innerText = `${i}x${i}`;
+            if (i === 8) opt.selected = true;
+            sizeSelect.appendChild(opt);
+        }
+
+        function setMode(mode, btn) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            const desc = document.getElementById('mode-desc');
+            desc.innerText = mode === 'peace' 
+                ? "Розставте N ферзів так, щоб вони не атакували один одного" 
+                : "Захопіть всі клітинки мінімальною кількістю ферзів";
+            
+            initBoard();
+        }
+
+        function initBoard() {
+            n = parseInt(sizeSelect.value);
+            limit = currentMode === 'peace' ? n : (domLimits[n] || n);
+            const theme = document.getElementById('colorSelect').value;
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            
+            const maxW = Math.min(window.innerWidth - 40, 550);
+            const cellSize = Math.floor(maxW / n);
+            board.style.gridTemplateColumns = `repeat(${n}, ${cellSize}px)`;
+            
+            queens = [];
+            gameActive = false;
+            stopTimer();
+            document.getElementById('timer').innerText = "00:00";
+            updateStatus();
+
+            for (let r = 0; r < n; r++) {
+                for (let c = 0; c < n; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.style.width = cellSize + 'px';
+                    cell.style.height = cellSize + 'px';
+                    cell.style.fontSize = (cellSize * 0.75) + 'px';
+                    const isLight = (r + c) % 2 === 0;
+                    cell.style.backgroundColor = `var(--${theme}-${isLight ? 'light' : 'dark'})`;
+                    cell.onclick = () => toggleQueen(r, c);
+                    board.appendChild(cell);
+                }
+            }
+        }
+
+        function toggleQueen(r, c) {
+            const idx = queens.findIndex(q => q.r === r && q.c === c);
+            if (idx !== -1) {
+                queens.splice(idx, 1);
+            } else {
+                if (queens.length >= limit) return;
+                if (!gameActive) startTimer();
+                queens.push({r, c});
+            }
+            render();
+        }
+
+        function render() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => cell.classList.remove('queen', 'controlled', 'conflict'));
+
+            let controlledCount = 0;
+            let conflicts = 0;
+
+            for (let r = 0; r < n; r++) {
+                for (let c = 0; c < n; c++) {
+                    const cellIdx = r * n + c;
+                    const isQueen = queens.some(q => q.r === r && q.c === c);
+                    
+                    // Перевірка атак для "Домінування" та конфліктів для "Миру"
+                    const attacks = queens.filter(q => q.r === r || q.c === c || Math.abs(q.r - r) === Math.abs(q.c - c));
+                    
+                    if (currentMode === 'dominate' && attacks.length > 0) {
+                        cells[cellIdx].classList.add('controlled');
+                        controlledCount++;
+                    }
+
+                    if (isQueen) {
+                        cells[cellIdx].classList.add('queen');
+                        if (currentMode === 'peace' && attacks.length > 1) {
+                            cells[cellIdx].classList.add('conflict');
+                            conflicts++;
+                        }
+                    }
+                }
+            }
+
+            updateStatus();
+            checkWin(controlledCount, conflicts);
+        }
+
+        function updateStatus() {
+            document.getElementById('status').innerText = `Ферзі: ${queens.length} / ${limit}`;
+        }
+
+        function checkWin(controlled, conflicts) {
+            if (currentMode === 'peace') {
+                if (queens.length === n && conflicts === 0) {
+                    stopTimer(); showWin("Ти молодець! Всі ферзі в безпеці.");
+                }
+            } else {
+                if (controlled === n * n && queens.length <= limit) {
+                    stopTimer(); showWin("Ти молодець! Вся дошка під контролем.");
+                }
+            }
+        }
+
+        function startTimer() {
+            gameActive = true; startTime = Date.now();
+            timerInterval = setInterval(() => {
+                let s = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById('timer').innerText = 
+                    `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+            }, 1000);
+        }
+
+        function stopTimer() { clearInterval(timerInterval); gameActive = false; }
+
+        function showWin(msg) {
+            document.getElementById('win-title').innerText = msg;
+            document.getElementById('win-stats').innerText = `Час: ${document.getElementById('timer').innerText}`;
+            document.getElementById('win-overlay').style.display = 'flex';
+        }
+
+        function closeWin() {
+            document.getElementById('win-overlay').style.display = 'none';
+            initBoard();
+        }
+
+        window.onresize = initBoard;
+        initBoard();
+    </script>
+</body>
+</html>
